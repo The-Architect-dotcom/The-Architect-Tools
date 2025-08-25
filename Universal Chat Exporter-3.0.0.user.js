@@ -1,0 +1,989 @@
+// ==UserScript==
+// @name         Universal Chat Exporter
+// @namespace    https://github.com/The-Architect-dotcom
+// @version      3.0.0
+// @description  Export ChatGPT Claude conversations as beautiful HTML + JSON (normal + Brotli compressed) - Enhanced Version
+// @author        Faizal Randy
+// @match        https://chatgpt.com/*
+// @match        https://chat.openai.com/*
+// @match        https://claude.ai/*
+// @grant        none
+// @license      MIT
+// @homepageURL  https://github.com/The-Architect-dotcom/The-Architect-Letters
+// @supportURL   https://github.com/The-Architect-dotcom/The-Architect-Letters/issues
+// @updateURL    https://raw.githubusercontent.com/The-Architect-dotcom/The-Architect-Letters/main/universal-chat-exporter.user.js
+// @downloadURL  https://raw.githubusercontent.com/The-Architect-dotcom/The-Architect-Letters/main/universal-chat-exporter.user.js
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    console.log('🌟 Universal Chat Exporter');
+
+    // Detect platform
+    const isChatGPT = window.location.hostname.includes('chatgpt.com') || window.location.hostname.includes('chat.openai.com');
+    const isClaude = window.location.hostname.includes('claude.ai');
+    const platformName = isChatGPT ? 'ChatGPT' : isClaude ? 'Claude' : 'Unknown';
+
+    console.log(`🎯 Platform detected: ${platformName}`);
+
+    // Load external dependencies
+    function loadScript(src) {
+        return new Promise((resolve, reject) => {
+            if (document.querySelector(`script[src="${src}"]`)) {
+                resolve();
+                return;
+            }
+            const script = document.createElement('script');
+            script.src = src;
+            script.onload = resolve;
+            script.onerror = reject;
+            document.head.appendChild(script);
+        });
+    }
+
+    function loadCSS(href) {
+        return new Promise((resolve) => {
+            if (document.querySelector(`link[href="${href}"]`)) {
+                resolve();
+                return;
+            }
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = href;
+            link.onload = resolve;
+            document.head.appendChild(link);
+        });
+    }
+
+    // Advanced compression using pako (Brotli-like deflate)
+    let pakoLoaded = false;
+    async function loadPako() {
+        if (pakoLoaded) return;
+        try {
+            await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js');
+            pakoLoaded = true;
+            console.log('✅ Pako compression library loaded');
+        } catch (e) {
+            console.warn('⚠️ Could not load Pako, using LZW fallback');
+        }
+    }
+
+    // Enhanced compression algorithms
+    const CompressionEngine = {
+        // Lightweight LZW (your original)
+        lzwEncode(s) {
+            if (!s) return '';
+            const dict = new Map();
+            for (let i = 0; i < 256; i++) dict.set(String.fromCharCode(i), i);
+            let phrase = '';
+            let code = 256;
+            const output = [];
+            for (let i = 0; i < s.length; i++) {
+                const c = s.charAt(i);
+                const pc = phrase + c;
+                if (dict.has(pc)) {
+                    phrase = pc;
+                } else {
+                    output.push(dict.get(phrase || c.charAt(0)));
+                    dict.set(pc, code++);
+                    phrase = c;
+                }
+            }
+            if (phrase !== '') output.push(dict.get(phrase));
+            return output.join(',');
+        },
+
+        // Advanced deflate using pako (better than Brotli for repetitive text)
+        deflateEncode(s) {
+            if (!window.pako) return null;
+            try {
+                const compressed = window.pako.deflate(s, { level: 9, windowBits: 15 });
+                return btoa(String.fromCharCode.apply(null, compressed));
+            } catch (e) {
+                console.error('Deflate compression failed:', e);
+                return null;
+            }
+        },
+
+        // Get best compression
+        getBestCompression(text) {
+            const original = text.length;
+
+            // Try deflate first (usually best for text)
+            const deflated = this.deflateEncode(text);
+            if (deflated) {
+                const deflateRatio = (1 - deflated.length / original) * 100;
+                console.log(`📊 Deflate compression: ${deflateRatio.toFixed(1)}% reduction`);
+                return {
+                    method: 'deflate',
+                    data: deflated,
+                    originalSize: original,
+                    compressedSize: deflated.length,
+                    ratio: deflateRatio
+                };
+            }
+
+            // Fallback to LZW
+            const lzwCompressed = this.lzwEncode(text);
+            const lzwRatio = (1 - lzwCompressed.length / original) * 100;
+            console.log(`📊 LZW compression: ${lzwRatio.toFixed(1)}% reduction`);
+
+            return {
+                method: 'lzw',
+                data: lzwCompressed,
+                originalSize: original,
+                compressedSize: lzwCompressed.length,
+                ratio: lzwRatio
+            };
+        }
+    };
+
+    // Platform-specific selectors
+    const PLATFORM_SELECTORS = {
+        chatgpt: {
+            conversationContainers: ['main'],
+            messageSelectors: ['article'],
+            roleDetection: (article, index) => index % 2 === 0 ? 'user' : 'assistant'
+        },
+        claude: {
+            conversationContainers: [
+                '[data-testid="conversation"]',
+                '.conversation',
+                '[role="main"]',
+                '.chat-container',
+                '.messages-container',
+                'main'
+            ],
+            messageSelectors: [
+                '[data-testid="message"]',
+                '.message',
+                '[data-is-streaming]',
+                '.prose',
+                '[role="article"]',
+                'article',
+                'div[class*="message"]'
+            ],
+            roleDetection: (element, index) => {
+                // Try to detect from attributes/classes
+                const userIndicators = ['user-message', 'human', 'user'];
+                const assistantIndicators = ['assistant-message', 'claude', 'assistant'];
+
+                const elementText = element.textContent.toLowerCase();
+                const elementClass = element.className.toLowerCase();
+
+                if (userIndicators.some(indicator => elementClass.includes(indicator) || elementText.includes(indicator))) {
+                    return 'user';
+                }
+                if (assistantIndicators.some(indicator => elementClass.includes(indicator) || elementText.includes(indicator))) {
+                    return 'assistant';
+                }
+
+                // Fallback to parity
+                return index % 2 === 0 ? 'user' : 'assistant';
+            }
+        }
+    };
+
+    function findElement(selectors) {
+        for (let selector of selectors) {
+            const element = document.querySelector(selector);
+            if (element) {
+                console.log(`✅ Found element with selector: ${selector}`);
+                return element;
+            }
+        }
+        return null;
+    }
+
+    function findAllElements(selectors) {
+        for (let selector of selectors) {
+            const elements = document.querySelectorAll(selector);
+            if (elements.length > 0) {
+                console.log(`✅ Found ${elements.length} elements with selector: ${selector}`);
+                return elements;
+            }
+        }
+        return [];
+    }
+
+    // Universal conversation extractor
+    function extractConversation() {
+        console.log(`🔍 Extracting conversation from ${platformName}...`);
+
+        const config = isChatGPT ? PLATFORM_SELECTORS.chatgpt : PLATFORM_SELECTORS.claude;
+
+        // Find conversation container
+        const container = findElement(config.conversationContainers);
+        let articles = [];
+
+        if (container) {
+            console.log('📦 Found conversation container');
+            articles = Array.from(container.querySelectorAll(config.messageSelectors.join(', ')));
+        }
+
+        // Fallback strategy
+        if (articles.length === 0) {
+            articles = Array.from(findAllElements(config.messageSelectors));
+        }
+
+        console.log(`📝 Found ${articles.length} messages to process`);
+
+        const conversation = [];
+        let validMessages = 0;
+
+        articles.forEach((article, index) => {
+            const text = article.textContent?.trim();
+            if (text& text.length > 10) {
+                const role = config.roleDetection(article, index);
+                conversation.push({
+                    role: role,
+                    content: text,
+                    html: article.innerHTML,
+                    index: validMessages
+                });
+                validMessages++;
+            }
+        });
+
+        console.log(`✅ Extracted ${validMessages} valid messages`);
+        return conversation;
+    }
+
+    // Enhanced JSON export with compression options
+    function exportToJSON(useCompression = false) {
+        try {
+            const conversation = extractConversation();
+            if (!conversation.length) {
+                alert('⚠️ No conversation found. Make sure you are on a conversation page.');
+                return;
+            }
+
+            const timestamp = new Date().toISOString();
+            const meta = {
+                platform: platformName,
+                url: window.location.href,
+                timestamp: timestamp,
+                messageCount: conversation.length,
+                author: '( Faizal Randy)',
+                exportVersion: '3.0.0',
+                compression: useCompression ? 'auto-best' : 'none'
+            };
+
+            let payload;
+            let filename;
+
+            if (useCompression) {
+                const jsonString = JSON.stringify({ meta, conversation });
+                const compressionResult = CompressionEngine.getBestCompression(jsonString);
+
+                payload = {
+                    meta: {
+                        ...meta,
+                        compressionMethod: compressionResult.method,
+                        originalSize: compressionResult.originalSize,
+                        compressedSize: compressionResult.compressedSize,
+                        compressionRatio: compressionResult.ratio
+                    },
+                    compressedData: compressionResult.data,
+                    note: `Compressed using ${compressionResult.method.toUpperCase()}. Compression ratio: ${compressionResult.ratio.toFixed(1)}%`
+                };
+                filename = `${platformName.toLowerCase()}-conversation-${timestamp.slice(0,19).replace(/[:]/g,'-')}-compressed.json`;
+            } else {
+                payload = { meta, conversation };
+                filename = `${platformName.toLowerCase()}-conversation-${timestamp.slice(0,19).replace(/[:]/g,'-')}.json`;
+            }
+
+            // Download
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            const compressionInfo = useCompression ?
+                  `\n📊 Compression: ${payload.meta.compressionRatio?.toFixed(1)}% reduction using ${payload.meta.compressionMethod?.toUpperCase()}` : '';
+
+            alert(`🌟${platformName} conversation exported as JSON!\n📁 File: ${filename}\n📝 Messages: ${conversation.length}${compressionInfo}`);
+
+        } catch (error) {
+            console.error('JSON export failed:', error);
+            alert('❌ JSON export failed: ' + error.message);
+        }
+    }
+
+    // Your original HTML export (enhanced for both platforms)
+    function exportToHTML() {
+        try {
+            console.log('📥 Starting HTML export process...');
+
+            const conversation = extractConversation();
+            if (!conversation.length) {
+                alert('⚠️ No conversation found. Make sure you are on a conversation page.');
+                return;
+            }
+
+            // Show loading state
+            const button = document.getElementById('export-html-btn');
+            const originalContent = button.innerHTML;
+            button.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 16px; height: 16px; border: 2px solid #ffffff40; border-top: 2px solid #ffffff; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                    <span>Exporting...</span>
+                </div>
+            `;
+            button.style.pointerEvents = 'none';
+
+            // Add spinner animation
+            if (!document.getElementById('export-spinner-style')) {
+                const style = document.createElement('style');
+                style.id = 'export-spinner-style';
+                style.textContent = '@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
+                document.head.appendChild(style);
+            }
+
+            setTimeout(() => {
+                try {
+                    const htmlContent = generateHTML(conversation);
+                    downloadHTML(htmlContent);
+
+                    button.innerHTML = `
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="20,6 9,17 4,12"></polyline>
+                        </svg>
+                        <span>Exported!</span>
+                    `;
+
+                    setTimeout(() => {
+                        button.innerHTML = originalContent;
+                        button.style.pointerEvents = 'auto';
+                    }, 2000);
+
+                } catch (error) {
+                    console.error('HTML export failed:', error);
+                    alert('❌ HTML export failed: ' + error.message);
+                    button.innerHTML = originalContent;
+                    button.style.pointerEvents = 'auto';
+                }
+            }, 100);
+
+        } catch (error) {
+            console.error('HTML export initialization failed:', error);
+            alert('❌ HTML export failed: ' + error.message);
+        }
+    }
+
+    // Generate beautiful HTML (enhanced for both platforms)
+    function generateHTML(conversation) {
+        const now = new Date();
+        const timestamp = now.toLocaleString();
+        let userMessages = 0;
+        let assistantMessages = 0;
+
+        conversation.forEach(msg => {
+            if (msg.role === 'user') userMessages++;
+            else assistantMessages++;
+        });
+
+        let htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${platformName} Conversation Export - Faizal Randy</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-dark.min.css">
+    <style>
+        :root {
+            --primary-color: #DEDDDA;
+            --user-color: #ff6b6b;
+            --assistant-color: ${isClaude ? '#8B5A87' : '#4ecdc4'};
+            --platform-color: ${isClaude ? '#8B5A87' : '#10a37f'};
+            --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            --font-size: 16px;
+            --bg-dark: #1a1a1a;
+            --bg-user: #2d1b1b;
+            --bg-assistant: ${isClaude ? '#2d1b2d' : '#1b2d2a'};
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-family);
+            font-size: var(--font-size);
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            color: var(--primary-color);
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .export-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        .control-panel {
+            position: sticky;
+            top: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            z-index: 100;
+            border: 1px solid #333;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .control-panel label {
+            color: var(--primary-color);
+            font-size: 14px;
+            font-weight: 500;
+            min-width: fit-content;
+        }
+
+        .control-panel select,
+        .control-panel input[type="color"],
+        .control-panel input[type="number"],
+        .control-panel input[type="range"] {
+            padding: 8px 12px;
+            border: 1px solid #444;
+            background: #2a2a2a;
+            color: var(--primary-color);
+            border-radius: 6px;
+            font-size: 14px;
+            min-width: 60px;
+        }
+
+        .control-panel input[type="color"] {
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        .export-header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 30px;
+            background: linear-gradient(135deg, #2d2d2d 0%, #1a1a1a 100%);
+            border-radius: 16px;
+            border: 1px solid #333;
+        }
+
+        .export-title {
+            font-size: 32px;
+            font-weight: 700;
+            margin: 0 0 10px 0;
+            background: linear-gradient(45deg, var(--user-color), var(--assistant-color));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .export-subtitle {
+            color: #888;
+            font-size: 16px;
+            margin: 0 0 20px 0;
+        }
+
+        .platform-badge {
+            background: var(--platform-color);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            display: inline-block;
+            margin: 0 10px;
+        }
+
+        .export-timestamp {
+            color: var(--assistant-color);
+            font-size: 14px;
+            font-family: 'Courier New', monospace;
+            background: rgba(78, 205, 196, 0.1);
+            padding: 8px 16px;
+            border-radius: 20px;
+            display: inline-block;
+        }
+
+        .conversation {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .message {
+            padding: 24px;
+            border-radius: 16px;
+            position: relative;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(5px);
+        }
+
+        .user-message {
+            background: linear-gradient(135deg, var(--bg-user) 0%, #3d2323 100%);
+            margin-left: 10%;
+            border-left: 4px solid var(--user-color);
+        }
+
+        .assistant-message {
+            background: linear-gradient(135deg, var(--bg-assistant) 0%, #234d47 100%);
+            margin-right: 10%;
+            border-left: 4px solid var(--assistant-color);
+        }
+
+        .message-role {
+            font-weight: 700;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .user-message .message-role {
+            color: var(--user-color);
+        }
+
+        .assistant-message .message-role {
+            color: var(--assistant-color);
+        }
+
+        .message-role::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .message-content {
+            color: var(--primary-color);
+            line-height: 1.7;
+        }
+
+        .code-block {
+            background: #282c34 !important;
+            color: #abb2bf !important;
+            padding: 20px !important;
+            margin: 20px 0 !important;
+            border-radius: 12px !important;
+            border: 1px solid #3e4451 !important;
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', monospace !important;
+            font-size: 14px !important;
+            line-height: 1.5 !important;
+            overflow-x: auto !important;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+        }
+
+        .inline-code {
+            background: rgba(78, 205, 196, 0.2);
+            color: var(--assistant-color);
+            padding: 3px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+            font-size: 0.9em;
+        }
+
+        .stats-bar {
+            margin-top: 40px;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            text-align: center;
+            font-size: 14px;
+            color: #888;
+        }
+
+        .islamic-footer {
+            margin-top: 30px;
+            text-align: center;
+            padding: 20px;
+            background: linear-gradient(45deg, #2d2d2d, #1a1a1a);
+            border-radius: 12px;
+            color: var(--assistant-color);
+            font-style: italic;
+        }
+
+        @media (max-width: 768px) {
+            body { padding: 10px; }
+            .control-panel { flex-direction: column; align-items: stretch; }
+            .control-group { justify-content: space-between; }
+            .message { margin-left: 0 !important; margin-right: 0 !important; padding: 16px; }
+            .export-title { font-size: 24px; }
+        }
+
+        @media print {
+            body { background: white; color: black; }
+            .control-panel { display: none; }
+            .message { box-shadow: none; border: 1px solid #ccc; }
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+</head>
+<body>
+    <div class="export-container">
+        <div class="control-panel">
+            <div class="control-group">
+                <label>🎨 Theme:</label>
+                <input type="color" value="#DEDDDA" onchange="updatePrimaryColor(this.value)">
+            </div>
+            <div class="control-group">
+                <label>👤 User Color:</label>
+                <input type="color" value="#ff6b6b" onchange="updateUserColor(this.value)">
+            </div>
+            <div class="control-group">
+                <label>🙂 Assistant Color:</label>
+                <input type="color" value="${isClaude ? '#8B5A87' : '#4ecdc4'}" onchange="updateAssistantColor(this.value)">
+            </div>
+            <div class="control-group">
+                <label>📝 Font:</label>
+                <select onchange="updateFont(this.value)">
+                    <option value="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">System Default</option>
+                    <option value="'Arial', sans-serif">Arial</option>
+                    <option value="'Georgia', serif">Georgia</option>
+                    <option value="'Times New Roman', serif">Times New Roman</option>
+                    <option value="'Courier New', monospace">Courier New</option>
+                    <option value="'SF Pro Display', sans-serif">SF Pro Display</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>📏 Size:</label>
+                <input type="range" min="12" max="24" value="16" onchange="updateFontSize(this.value)">
+                <span id="font-size-display">16px</span>
+            </div>
+        </div>
+
+        <div class="export-header">
+            <h1 class="export-title">${platformName} Conversation</h1>
+            <div class="platform-badge">${platformName}</div>
+            <p class="export-subtitle">Exported with Universal Chat Exporter by Faizal Randy</p>
+            <div class="export-timestamp">📅 ${timestamp}</div>
+        </div>
+
+        <div class="conversation">
+`;
+
+        conversation.forEach((message, index) => {
+            const isUser = message.role === 'user';
+            const roleDisplay = isUser ? '👤  Faizal Randy' : `🙂 ${platformName}`;
+            const messageClass = isUser ? 'user-message' : 'assistant-message';
+
+            // Clean and enhance content
+            let content = message.html;
+
+            // Clean unwanted elements
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = content;
+            tempDiv.querySelectorAll('button, input, select, textarea, [role="button"]').forEach(el => el.remove());
+            content = tempDiv.innerHTML;
+
+            // Enhance code blocks
+            content = content.replace(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/gi,
+                                      '<pre class="code-block"><code>$1</code></pre>');
+            content = content.replace(/<code[^>]*>(.*?)<\/code>/gi, '<code class="inline-code">$1</code>');
+
+            htmlContent += `
+            <div class="message ${messageClass}" data-message="${index + 1}">
+                <div class="message-role">${roleDisplay}</div>
+                <div class="message-content">${content}</div>
+            </div>`;
+        });
+
+        htmlContent += `
+        </div>
+
+        <div class="islamic-footer">
+            <p>🤲 <strong>Bismillah</strong> - In the name of Allah, the Most Gracious, the Most Merciful</p>
+            <p><em>This knowledge is preserved for the benefit of humanity</em></p>
+        </div>
+
+        <div class="stats-bar">
+            📊 <strong>${conversation.length}</strong> messages total •
+            👤 <strong>${userMessages}</strong> user messages •
+            🙂 <strong>${assistantMessages}</strong> assistant messages •
+            🚀 Exported by <em>Universal Chat Exporter v3.0.0</em> •
+            💎 Created by <strong> Faizal Randy</strong>
+        </div>
+    </div>
+
+    <script>
+        function updatePrimaryColor(color) { document.documentElement.style.setProperty('--primary-color', color); }
+        function updateUserColor(color) { document.documentElement.style.setProperty('--user-color', color); }
+        function updateAssistantColor(color) { document.documentElement.style.setProperty('--assistant-color', color); }
+        function updateFont(font) { document.documentElement.style.setProperty('--font-family', font); }
+        function updateFontSize(size) {
+            document.documentElement.style.setProperty('--font-size', size + 'px');
+            document.getElementById('font-size-display').textContent = size + 'px';
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof hljs !== 'undefined') { hljs.highlightAll(); }
+        });
+
+        console.log('🌟 ${platformName} conversation exported successfully!');
+        console.log('📝 Total messages: ${conversation.length}');
+        console.log('👤 User messages: ${userMessages}');
+        console.log('🙂 Assistant messages: ${assistantMessages}');
+        console.log('🚀 Created by Faizal Randy');
+        console.log('💎 Symbolic Mechanics Framework preserved for humanity');
+    </script>
+</body>
+</html>`;
+
+        return htmlContent;
+    }
+
+    // Download HTML file
+    function downloadHTML(htmlContent) {
+        const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+
+        const now = new Date();
+        const timestamp = now.toISOString().slice(0, 19).replace(/[:]/g, '-');
+        link.download = `${platformName.toLowerCase()}-conversation-alfaisal-${timestamp}.html`;
+
+        document.body.appendChild(link);
+        link.click();
+
+        setTimeout(() => {
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }, 100);
+
+        console.log('✅ HTML file downloaded successfully!');
+        alert(`🌟${platformName} conversation exported as beautiful HTML!\n📁 File saved with Islamic formatting and your branding!`);
+    }
+
+    // Create enhanced floating export menu
+    function createExportMenu() {
+        // Remove existing menu
+        const existing = document.getElementById('universal-export-container');
+        if (existing) existing.remove();
+
+        const container = document.createElement('div');
+        container.id = 'universal-export-container';
+        Object.assign(container.style, {
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            zIndex: '10000',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            alignItems: 'stretch'
+        });
+
+        const baseBtnStyle = {
+            padding: '10px 14px',
+            backgroundColor: isClaude ? '#8B5A87' : '#10a37f',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontSize: '13px',
+            fontWeight: '500',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            boxShadow: '0 4px 12px rgba(16, 163, 127, 0.3)',
+            transition: 'all 0.18s ease',
+            minWidth: '160px',
+            textAlign: 'left'
+        };
+
+        // HTML Export button
+        const btnHTML = document.createElement('button');
+        btnHTML.id = 'export-html-btn';
+        btnHTML.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:8px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>Export HTML`;
+        Object.assign(btnHTML.style, baseBtnStyle);
+        btnHTML.addEventListener('mouseenter', () => {
+            btnHTML.style.transform = 'translateY(-2px)';
+            btnHTML.style.opacity = '1';
+        });
+        btnHTML.addEventListener('mouseleave', () => {
+            btnHTML.style.transform = 'translateY(0)';
+            btnHTML.style.opacity = '0.95';
+        });
+        btnHTML.addEventListener('click', exportToHTML);
+
+        // JSON Normal button
+        const btnJSON = document.createElement('button');
+        btnJSON.id = 'export-json-btn';
+        btnJSON.innerHTML = '📄 Export JSON';
+        Object.assign(btnJSON.style, baseBtnStyle);
+        btnJSON.style.backgroundColor = '#3b82f6';
+        btnJSON.addEventListener('click', () => exportToJSON(false));
+        btnJSON.addEventListener('mouseenter', () => { btnJSON.style.transform = 'translateY(-2px)'; });
+        btnJSON.addEventListener('mouseleave', () => { btnJSON.style.transform = 'translateY(0)'; });
+
+        // JSON Compressed button
+        const btnJSONC = document.createElement('button');
+        btnJSONC.id = 'export-json-compressed-btn';
+        btnJSONC.innerHTML = '🗜️ JSON Compressed';
+        Object.assign(btnJSONC.style, baseBtnStyle);
+        btnJSONC.style.backgroundColor = '#f59e0b';
+        btnJSONC.addEventListener('click', () => exportToJSON(true));
+        btnJSONC.addEventListener('mouseenter', () => { btnJSONC.style.transform = 'translateY(-2px)'; });
+        btnJSONC.addEventListener('mouseleave', () => { btnJSONC.style.transform = 'translateY(0)'; });
+
+        // Platform indicator
+        const platformLabel = document.createElement('div');
+        platformLabel.innerHTML = `${isClaude ? '🙂' : '💬'} ${platformName}`;
+        Object.assign(platformLabel.style, {
+            padding: '6px 12px',
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            color: '#888',
+            borderRadius: '6px',
+            fontSize: '12px',
+            textAlign: 'center',
+            fontWeight: '500'
+        });
+
+        container.appendChild(platformLabel);
+        container.appendChild(btnHTML);
+        container.appendChild(btnJSON);
+        container.appendChild(btnJSONC);
+        document.body.appendChild(container);
+
+        // Auto-hide on scroll
+        let lastScrollTop = 0;
+        window.addEventListener('scroll', () => {
+            const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+            const hide = scrollTop > lastScrollTop& scrollTop > 120;
+            container.style.opacity = hide ? '0.25' : '1';
+            lastScrollTop = scrollTop;
+        });
+
+        console.log(`✅ Export menu created for ${platformName}`);
+    }
+
+    // Initialize the script
+    async function initialize() {
+        try {
+            // Load dependencies
+            console.log('🔄 Loading dependencies...');
+            await Promise.all([
+                loadPako(),
+                loadScript('https://cdn.jsdelivr.net/npm/dompurify@3.2.3/dist/purify.min.js').catch(() => {}),
+                loadScript('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js').catch(() => {}),
+                loadCSS('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-dark.min.css').catch(() => {})
+            ]);
+
+            console.log('✅ Dependencies loaded');
+
+            // Wait for page to load
+            if (document.readyState === 'loading') {
+                await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve));
+            }
+
+            // Small delay to ensure page is ready
+            setTimeout(() => {
+                createExportMenu();
+                console.log(`🚀 Universal Chat Exporter ready for ${platformName}!`);
+                console.log('🌟 Created by Faizal Randy');
+                console.log('💎 Bismillah - ready to preserve knowledge for humanity');
+            }, 2000);
+
+        } catch (error) {
+            console.error('❌ Failed to initialize Universal Chat Exporter:', error);
+        }
+    }
+
+    // Handle page navigation and dynamic content
+    function observePageChanges() {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'childList'& mutation.addedNodes.length > 0) {
+                    // Check if we're still on a supported platform
+                    if ((isChatGPT || isClaude)& !document.getElementById('universal-export-container')) {
+                        setTimeout(createExportMenu, 1000);
+                    }
+                }
+            });
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    // Handle navigation between different chat pages
+    let lastUrl = location.href;
+    new MutationObserver(() => {
+        const url = location.href;
+        if (url !== lastUrl) {
+            lastUrl = url;
+            // Check if still on supported platform
+            if ((url.includes('chatgpt.com') || url.includes('chat.openai.com') || url.includes('claude.ai'))) {
+                setTimeout(createExportMenu, 2000);
+            } else {
+                // Remove menu if navigated away
+                const container = document.getElementById('universal-export-container');
+                if (container) container.remove();
+            }
+        }
+    }).observe(document, { subtree: true, childList: true });
+
+    // Debug functions for development
+    window.debugUniversalExporter = function() {
+        console.log('🔍 DEBUG: Universal Chat Exporter Status');
+        console.log(`Platform: ${platformName}`);
+        console.log(`Current URL: ${window.location.href}`);
+        console.log(`Pako loaded: ${pakoLoaded}`);
+
+        const conversation = extractConversation();
+        console.log(`Messages found: ${conversation.length}`);
+        conversation.slice(0, 3).forEach((msg, i) => {
+            console.log(`Message ${i}: ${msg.role} - "${msg.content.substring(0, 100)}..."`);
+        });
+    };
+
+    // Keyboard shortcuts (optional)
+    document.addEventListener('keydown', (e) => {
+        // Ctrl+Shift+E for HTML export
+        if (e.ctrlKey& e.shiftKey& e.key === 'E') {
+            e.preventDefault();
+            exportToHTML();
+        }
+        // Ctrl+Shift+J for JSON export
+        if (e.ctrlKey& e.shiftKey& e.key === 'J') {
+            e.preventDefault();
+            exportToJSON(false);
+        }
+        // Ctrl+Shift+C for compressed export
+        if (e.ctrlKey& e.shiftKey& e.key === 'C') {
+            e.preventDefault();
+            exportToJSON(true);
+        }
+    });
+
+    // Initialize everything
+    console.log(`🌟 Starting Universal Chat Exporter for ${platformName}...`);
+    initialize();
+    observePageChanges();
+
+})();
