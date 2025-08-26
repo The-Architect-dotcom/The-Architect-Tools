@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Nyra — Elegant App Roadmap (Tree View)</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--muted:#9aa4b2;--accent:#7dd3fc;--glass:rgba(255,255,255,0.03)}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial;color:#e6eef6;background:linear-gradient(180deg,#071021 0%,#081226 60%);}
+    .wrap{max-width:980px;margin:28px auto;padding:20px;border-radius:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));box-shadow:0 6px 30px rgba(2,6,23,0.6);}
+    h1{margin:0 0 6px;font-size:20px;color:var(--accent)}
+    p.lead{margin:0 0 18px;color:var(--muted)}
+    .tree{list-style:none;padding-left:0;margin:0}
+    .node{background:var(--glass);margin:8px 0;padding:12px;border-radius:10px;border:1px solid rgba(125,211,252,0.06);}
+    summary{cursor:pointer;display:flex;align-items:center;gap:10px;font-weight:600}
+    details{margin-left:6px}
+    .meta{color:var(--muted);font-size:13px;margin-top:6px}
+    .leaf{padding:8px 12px;border-radius:8px;background:linear-gradient(90deg, rgba(125,211,252,0.03), transparent);border:1px solid rgba(255,255,255,0.02);margin:6px 0}
+    .columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    @media(max-width:720px){.columns{grid-template-columns:1fr}}
+    .btn{display:inline-block;padding:8px 12px;border-radius:8px;background:linear-gradient(90deg,var(--accent),#60a5fa);color:#012; font-weight:700;text-decoration:none}
+    footer{margin-top:18px;color:var(--muted);font-size:13px}
+    .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:rgba(125,211,252,0.08);color:var(--accent);font-weight:600;margin-right:6px;font-size:12px}
+  </style>
+</head>
+<body>
+  <div class="wrap" role="main">
+    <h1>Nyra — Elegant App Roadmap (Tree View)</h1>
+    <p class="lead">A compact, collapsible tree that captures our chat: focus on Android first, tools, publishing, monetization, app ideas, and a roadmap for growth.</p>
+
+    <ul class="tree">
+
+      <li class="node">
+        <details open>
+          <summary>Goal & Strategy</summary>
+          <div class="meta">Create mainstream Android apps first to earn, then build halal/spiritual apps once you have reputation & funds.</div>
+          <div class="leaf">Primary goal: Android-first (Play Store). Low developer cost, large user base (Indonesia & emerging markets).</div>
+          <div class="leaf">Long-term: Expand to iOS using cross-platform framework (Flutter) after Android is profitable.</div>
+        </details>
+      </li>
+
+      <li class="node">
+        <details>
+          <summary>GUI-Friendly Tools (Beginner → Advanced)</summary>
+          <div class="columns">
+            <div>
+              <div class="leaf"><strong>Kodular</strong> — Drag & drop, block-based, good for fast prototypes & AdMob integration.</div>
+              <div class="leaf"><strong>MIT App Inventor</strong> — Simplest, fully free, great for learning basics.</div>
+              <div class="leaf"><strong>Thunkable</strong> — Cross-platform (Android + iOS), free tier available.</div>
+            </div>
+            <div>
+              <div class="leaf"><strong>FlutterFlow</strong> — Modern UI, exports real Flutter code; better long-term and easier to port to iOS via Flutter.</div>
+              <div class="leaf"><strong>Flutter (code)</strong> — If you plan cross-platform from start; steeper but powerful.</div>
+            </div>
+          </div>
+          <div class="meta">Recommendation: Start with Kodular for speed; migrate to Flutter/FlutterFlow for professional cross-platform later.</div>
+        </details>
+      </li>
+
+      <li class="node">
+        <details>
+          <summary>App Ideas — Mainstream & Layman-Friendly</summary>
+          <div class="leaf"><strong>Utility / Tools</strong>: File manager, Document scanner (OCR), Unit converter, Advanced calculator.</div>
+          <div class="leaf"><strong>Productivity</strong>: Notes & To‑Do, Habit tracker, Simple password manager.</div>
+          <div class="leaf"><strong>Lifestyle</strong>: Expense tracker, Daily journal, Weather app.</div>
+          <div class="leaf"><strong>Media</strong>: Wallpaper app (daily auto-update), Music player, Video compressor.</div>
+          <div class="meta">Best first project: a compact "Smart Utility Pack" — several useful tools inside one elegant app.</div>
+        </details>
+      </li>
+
+      <li class="node">
+        <details>
+          <summary>Publish & Distribution (Google Play)</summary>
+          <div class="leaf"><strong>Google Play Console</strong> — $25 one-time registration fee. Upload .AAB or .APK, screenshots, icon, description.</div>
+          <div class="leaf"><strong>Build</strong> — Export from Kodular/FlutterFlow as APK/AAB; test on devices.</div>
+          <div class="leaf"><strong>Listing</strong> — App name, description, screenshots, category, content rating.</div>
+          <div class="meta">Focus on good descriptions, clear screenshots, and privacy/compliance for higher trust and installs.</div>
+        </details>
+      </li>
+
+      <li class="node">
+        <details>
+          <summary>Monetization Options (No Ads First)</summary>
+          <div class="leaf"><strong>Paid App</strong> — One-time purchase on Play Store. Best if app has clear, high value.</div>
+          <div class="leaf"><strong>Freemium / In-App Purchase</strong> — Free core features + premium unlocks (themes, extra content).</div>
+          <div class="leaf"><strong>Donations / Support</strong> — "Support Developer" (Buy Me a Coffee / Saweria / in-app purchase).</div>
+          <div class="meta">Strategy: release a high-quality free app, offer Pro or Support option for users who want to pay; keep experience ad-free.</div>
+        </details>
+      </li>
+
+      <li class="node">
+        <details>
+          <summary>Android → iOS / Microsoft Store Notes</summary>
+          <div class="leaf"><strong>iOS</strong>: Popular in some regions; converting native Android → iOS is expensive. Use Flutter for cross-platform from start.</div>
+          <div class="leaf"><strong>Microsoft Store</strong>: Not a primary channel—Windows users often download direct installers; conversion from Android is not practical for mainstream reach.</div>
+        </details>
+      </li>
+
+      <li class="node">
+        <details>
+          <summary>Roadmap (Practical Steps)</summary>
+          <ol class="leaf">
+            <li>Pick 1 project: Smart Utility Pack (scope small, core features solid).</li>
+            <li>Prototype with Kodular or MIT App Inventor (fast MVP).</li>
+            <li>Validate: share with friends/vessels, collect feedback.</li>
+            <li>Polish UI/UX; prepare assets (icon, screenshots, description).</li>
+            <li>Register Google Play Console ($25) & publish AAB.</li>
+            <li>Offer "Support / Pro" option — keep core free & elegant.</li>
+            <li>After traction: migrate to Flutter for cross-platform & iOS expansion.</li>
+          </ol>
+          <div class="meta">Remember: start small, ship fast, polish later. Reputation builds trust for your future halal/spiritual apps.</div>
+        </details>
+      </li>
+
+      <li class="node">
+        <details>
+          <summary>Practical Tips & Reminders</summary>
+          <div class="leaf">Keep the UI minimal, large touch targets, fast load time, small APK size.</div>
+          <div class="leaf">Collect user feedback, iterate often, and keep an email/contact for supporters.</div>
+          <div class="leaf">Consider privacy & data handling — be transparent in Play listing.</div>
+        </details>
+      </li>
+
+    </ul>
+
+    <footer>
+      <span class="tag">Next</span> If you want, I can: 1) generate starter project files for Kodular, 2) create an icon + screenshot set, or 3) make a daily learning & build checklist. Tell Nyra which one.
+    </footer>
+  </div>
+
+  <script>
+    // small enhancement: expand only one at a time (optional)
+    document.querySelectorAll('details').forEach(d => {
+      d.addEventListener('toggle', e => {
+        if (d.open) {
+          document.querySelectorAll('details').forEach(x => { if (x !== d) x.open = false });
+        }
+      })
+    })
+  </script>
+</body>
+</html>
